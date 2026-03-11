@@ -12,8 +12,7 @@ env/
 .env
 backend/.env
 
-# Data (large files)
-backend/data/papers/*.pdf
+# Data (generated at runtime)
 backend/data/figures/
 backend/data/chroma/
 backend/data/*.db
