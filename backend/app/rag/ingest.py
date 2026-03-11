@@ -71,12 +71,52 @@ def _file_hash(filepath: str) -> str:
     return h.hexdigest()
 
 
-def _guess_title(text_blocks: list[dict]) -> str:
-    """Use the first large-font block as a rough title guess."""
+_JOURNAL_PATTERNS = {
+    "geophysical research letters", "journal of geophysical research",
+    "science advances", "science", "nature", "nature geoscience",
+    "nature communications", "reviews of geophysics", "eos",
+    "bulletin of the seismological society", "geophysical journal international",
+    "seismological research letters", "water resources research",
+    "journal of hydrology", "advances in water resources",
+    "atmospheric chemistry and physics", "journal of climate",
+    "monthly weather review", "geological society", "tectonophysics",
+    "earth and planetary science letters", "proceedings of the national academy",
+}
+
+
+def _is_journal_name(text: str) -> bool:
+    normalized = text.strip().lower()
+    return any(j in normalized for j in _JOURNAL_PATTERNS)
+
+
+def _title_from_filename(filename: str) -> str:
+    """Try to extract a paper title from structured filenames like
+    'Journal - Year - Author - Title.pdf'."""
+    stem = filename.rsplit(".", 1)[0]
+    parts = [p.strip() for p in stem.split(" - ")]
+    if len(parts) >= 4:
+        return parts[-1][:200]
+    return ""
+
+
+def _guess_title(text_blocks: list[dict], filename: str = "") -> str:
+    """Extract paper title: try filename structure first, then largest-font text block."""
+    from_name = _title_from_filename(filename)
+    if from_name:
+        return from_name
+
     if not text_blocks:
         return ""
-    first = max(text_blocks[:10], key=lambda b: b["font_size"], default=None)
-    return first["text"][:200].strip() if first else ""
+    candidates = sorted(text_blocks[:10], key=lambda b: b["font_size"], reverse=True)
+    for block in candidates:
+        txt = block["text"].strip()
+        if not txt or len(txt.split()) < 4:
+            continue
+        if _is_journal_name(txt):
+            continue
+        return txt[:200]
+    fallback = max(text_blocks[:10], key=lambda b: b["font_size"], default=None)
+    return fallback["text"][:200].strip() if fallback else ""
 
 
 async def ingest_papers(
@@ -132,7 +172,7 @@ async def ingest_papers(
 
         chunks = await embed_chunks(llm_client, chunks)
 
-        title = _guess_title(text_blocks)
+        title = _guess_title(text_blocks, filename)
 
         ids = []
         documents = []

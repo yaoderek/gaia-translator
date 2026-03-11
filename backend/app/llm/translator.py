@@ -118,23 +118,38 @@ def _extract_follow_ups(text: str) -> list[str]:
     return items[:4]
 
 
+def _normalize_title(t: str) -> str:
+    return " ".join(t.strip().lower().rstrip(".").split())
+
+
 def _build_citations(chunks: list[dict]) -> list[dict]:
-    """One citation per unique paper_id. Merges excerpts from multiple chunks."""
+    """One citation per unique paper, deduped by paper_id then by normalized title."""
     paper_order: list[str] = []
     paper_map: dict[str, dict] = {}
+    title_to_pid: dict[str, str] = {}
 
     for chunk in chunks:
         meta = chunk.get("metadata", {})
         paper_id = meta.get("paper_id", "unknown")
-        if paper_id not in paper_map:
-            paper_order.append(paper_id)
-            paper_map[paper_id] = {
-                "paper_id": paper_id,
-                "title": meta.get("title", ""),
-                "authors": meta.get("authors", ""),
-                "excerpt": chunk.get("text", "")[:300],
-                "doi": meta.get("doi"),
-            }
+
+        if paper_id in paper_map:
+            continue
+
+        title = meta.get("title", "")
+        norm = _normalize_title(title)
+        if norm and norm in title_to_pid:
+            continue
+
+        paper_order.append(paper_id)
+        paper_map[paper_id] = {
+            "paper_id": paper_id,
+            "title": title,
+            "authors": meta.get("authors", ""),
+            "excerpt": chunk.get("text", "")[:300],
+            "doi": meta.get("doi"),
+        }
+        if norm:
+            title_to_pid[norm] = paper_id
 
     return [
         {"index": i + 1, **paper_map[pid]}

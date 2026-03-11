@@ -46,16 +46,34 @@ def build_streaming_prompt(
 
     system_content = f"""{_core_system_prompt(src_info, tgt_info)}
 
+## Output Structure
+Your response MUST contain exactly three sections separated by HTML comment markers.
+Follow this template exactly:
+
+<!-- SECTION: overview -->
+**Translation for {tgt_info['label']}**
+A concise overview (3-5 sentences) of what the source text is saying, translated into \
+{tgt_info['label']} terms. Map the key jargon and give the reader the gist.
+
+<!-- SECTION: relevance -->
+**Why This Matters for {tgt_info['label']} Research**
+A deeper explanation (1-2 paragraphs) of the specific, practical implications for \
+{tgt_info['label']} work. Be concrete: name specific pipelines, datasets, models, \
+measurements, or analyses that are affected. Connect to the lab's geohazard mission.
+
+<!-- SECTION: workstreams -->
+**Potentially Relevant Domain Workstreams**
+List 2-3 concrete, actionable workstreams where {tgt_info['label']} expertise would \
+directly advance the lab's geohazard mission in light of what was just translated. \
+Format each as: **Workstream Name**: description. Each should be specific enough \
+that the reader could start working on it.
+
 ## Formatting Rules
-- Write clear, concise prose. Aim for 150-250 words in the main translation -- be dense with insight, not verbose.
-- Use **bold text** for section headers, NEVER use ### or ## markdown headers in your output.
+- Use **bold text** for headers, NEVER use ### or ## markdown headers.
 - Use [n] bracket notation to cite literature inline.
 - When relevant, mention [Fig: paper_id/fig_num].
-- End with a section headed **Potentially Relevant Domain Workstreams** listing 2-3 concrete, \
-actionable workstreams where {tgt_info['label']} expertise would directly advance the lab's \
-geohazard mission in light of what was just translated. Each should be specific enough that the \
-reader could start working on it.
 - Do NOT wrap your response in JSON or code fences.
+- The <!-- SECTION: ... --> markers are mandatory and must appear exactly as shown.
 
 {context_block}
 
@@ -93,20 +111,48 @@ aggregating multimodal data for soil understanding and geohazard prediction.
 tell the computer scientist which input features or data channels this corresponds to in their \
 modeling pipeline, or tell the hydrologist what this implies about pore pressure or infiltration \
 rates they should be measuring.
-4. **Cite literature** with [n] bracket notation from the provided context."""
+4. **Cite literature** with [n] bracket notation from the provided context. Each [n] corresponds \
+to a unique paper -- multiple passages from the same paper share the same number. Only use [n] values \
+that appear in the retrieved literature section."""
 
 
 def _format_context(chunks: list[dict]) -> str:
     if not chunks:
         return "## Retrieved Literature\nNo relevant literature was retrieved."
 
-    lines = ["## Retrieved Literature"]
-    for i, chunk in enumerate(chunks, 1):
+    paper_index: dict[str, int] = {}
+    title_to_idx: dict[str, int] = {}
+    counter = 0
+    for chunk in chunks:
         meta = chunk.get("metadata", {})
-        paper_id = meta.get("paper_id", "unknown")
+        pid = meta.get("paper_id", "unknown")
+        if pid in paper_index:
+            continue
+        title = meta.get("title", "")
+        norm = " ".join(title.strip().lower().rstrip(".").split())
+        if norm and norm in title_to_idx:
+            paper_index[pid] = title_to_idx[norm]
+            continue
+        counter += 1
+        paper_index[pid] = counter
+        if norm:
+            title_to_idx[norm] = counter
+
+    lines = [
+        "## Retrieved Literature",
+        "Each [n] refers to a unique paper. Multiple passages from the same paper share the same [n].",
+        "",
+    ]
+    for chunk in chunks:
+        meta = chunk.get("metadata", {})
+        pid = meta.get("paper_id", "unknown")
+        idx = paper_index[pid]
+        title = meta.get("title", "")
         section = meta.get("section_title", "")
         text = chunk.get("text", "")
-        header = f"[{i}] paper_id={paper_id}"
+        header = f"[{idx}] paper_id={pid}"
+        if title:
+            header += f' | title="{title}"'
         if section:
             header += f' | section="{section}"'
         lines.append(header)
