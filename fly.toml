@@ -1,0 +1,17 @@
+app = "gaia-translator"
+primary_region = "sea"
+
+[build]
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[env]
+  CHROMA_PERSIST_DIR = "./data/chroma"
+  PAPERS_DIR = "./data/papers"
+  FIGURES_DIR = "./data/figures"
+  SQLITE_DB_PATH = "./data/gaia.db"
