@@ -42,7 +42,7 @@ class TranslationEngine:
         )
 
         figures = _filter_meaningful_figures(
-            self._retriever.get_figures_for_chunks(chunks)
+            await self._retriever.get_figures_for_chunks(chunks)
         )
 
         messages = build_translation_prompt(
@@ -69,7 +69,7 @@ class TranslationEngine:
             discipline_filter=discipline_filter,
         )
         figures = _filter_meaningful_figures(
-            self._retriever.get_figures_for_chunks(chunks)
+            await self._retriever.get_figures_for_chunks(chunks)
         )
 
         messages = build_streaming_prompt(

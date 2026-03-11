@@ -12,10 +12,8 @@ env/
 .env
 backend/.env
 
-# Data (generated at runtime)
-backend/data/figures/
-backend/data/chroma/
-backend/data/*.db
+# Data (local processing artifacts)
+backend/data/
 
 # Node
 node_modules/

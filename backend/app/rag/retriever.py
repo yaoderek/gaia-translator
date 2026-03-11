@@ -1,13 +1,17 @@
-import sqlite3
+import logging
 
-import chromadb
+import asyncpg
+import numpy as np
+from pgvector.asyncpg import register_vector
 
 from app.llm.client import LLMClient
 
+logger = logging.getLogger(__name__)
+
 
 class Retriever:
-    def __init__(self, collection: chromadb.Collection, llm_client: LLMClient) -> None:
-        self._collection = collection
+    def __init__(self, pool: asyncpg.Pool, llm_client: LLMClient) -> None:
+        self._pool = pool
         self._llm = llm_client
 
     async def search(
@@ -17,59 +21,42 @@ class Retriever:
         discipline_filter: list[str] | None = None,
     ) -> list[dict]:
         query_embedding = (await self._llm.embed([query]))[0]
+        vec = np.array(query_embedding, dtype=np.float32)
 
-        where_filter = None
-        if discipline_filter:
-            where_filter = {
-                "$or": [
-                    {"discipline_tags": {"$eq": tag}} for tag in discipline_filter
-                ]
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, paper_id, section_title, content, title, authors,
+                       discipline_tags, embedding <=> $1::vector AS distance
+                FROM chunks
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+                """,
+                vec,
+                n_results,
+            )
+
+        return [
+            {
+                "text": row["content"],
+                "metadata": {
+                    "paper_id": row["paper_id"],
+                    "section_title": row["section_title"] or "",
+                    "title": row["title"] or "",
+                    "authors": row["authors"] or "",
+                    "discipline_tags": row["discipline_tags"] or "general",
+                },
+                "distance": float(row["distance"]),
             }
+            for row in rows
+        ]
 
-        try:
-            results = self._collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=where_filter,
-                include=["documents", "metadatas", "distances"],
-            )
-        except Exception:
-            results = self._collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                include=["documents", "metadatas", "distances"],
-            )
-
-        output: list[dict] = []
-        if not results or not results.get("ids") or not results["ids"][0]:
-            return output
-
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
-            output.append(
-                {
-                    "text": doc,
-                    "metadata": meta or {},
-                    "distance": dist,
-                }
-            )
-        return output
-
-    def get_figures_for_chunks(
+    async def get_figures_for_chunks(
         self,
         chunk_results: list[dict],
-        db_path: str | None = None,
     ) -> list[dict]:
-        """Query SQLite for figures near retrieved chunks."""
-        if db_path is None:
-            from app.core.config import get_settings
-            db_path = get_settings().sqlite_db_path
-
-        paper_ids = set()
-        pages = set()
+        paper_ids: set[str] = set()
+        pages: set[int] = set()
         for chunk in chunk_results:
             meta = chunk.get("metadata", {})
             pid = meta.get("paper_id")
@@ -83,29 +70,28 @@ class Retriever:
         if not paper_ids:
             return []
 
-        page_range = (min(pages) - 1, max(pages) + 1) if pages else (0, 9999)
+        page_lo = min(pages) - 1 if pages else 0
+        page_hi = max(pages) + 1 if pages else 9999
 
-        try:
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            placeholders = ",".join("?" for _ in paper_ids)
-            query = (
-                f"SELECT id, paper_id, page, filepath, caption, width, height "
-                f"FROM figures WHERE paper_id IN ({placeholders}) "
-                f"AND page >= ? AND page <= ?"
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, paper_id, page, s3_key, caption, width, height
+                FROM figures
+                WHERE paper_id = ANY($1::text[])
+                  AND page >= $2 AND page <= $3
+                """,
+                list(paper_ids),
+                page_lo,
+                page_hi,
             )
-            params = list(paper_ids) + [page_range[0], page_range[1]]
-            rows = conn.execute(query, params).fetchall()
-            conn.close()
-        except Exception:
-            return []
 
         return [
             {
                 "figure_id": row["id"],
                 "paper_id": row["paper_id"],
                 "page": row["page"],
-                "filepath": row["filepath"],
+                "s3_key": row["s3_key"],
                 "caption": row["caption"] or "",
                 "width": row["width"],
                 "height": row["height"],

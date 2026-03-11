@@ -25,3 +25,20 @@ export async function triggerIngest(): Promise<{
 export function getFigureUrl(figureId: string): string {
   return `/api/figures/${figureId}`;
 }
+
+export async function uploadPaper(file: File): Promise<{
+  status: string;
+  paper_id: string;
+  title?: string;
+  message?: string;
+  num_chunks?: number;
+  num_figures?: number;
+}> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await client.post("/papers/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 120_000,
+  });
+  return data;
+}
