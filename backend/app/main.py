@@ -12,7 +12,7 @@ from app.api.translate import router as translate_router
 from app.core.config import get_settings
 from app.llm.client import LLMClient
 from app.llm.translator import TranslationEngine
-from app.rag.ingest import init_db
+from app.rag.ingest import init_db, ingest_papers
 from app.rag.retriever import Retriever
 from app.rag.vectorstore import get_chroma_client, get_or_create_collection
 
@@ -41,6 +41,14 @@ async def lifespan(app: FastAPI):
     app.state.collection = collection
     app.state.retriever = retriever
     app.state.translation_engine = translation_engine
+
+    if collection.count() == 0:
+        logger.info("No papers in vector store, running auto-ingestion...")
+        result = await ingest_papers(settings, llm_client, collection)
+        logger.info(
+            "Auto-ingested %d paper(s): %d chunks, %d figures",
+            result["papers_ingested"], result["total_chunks"], result["total_figures"],
+        )
 
     logger.info("GAIA Translator backend ready.")
     yield
