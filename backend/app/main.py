@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -18,6 +19,20 @@ from app.rag.vectorstore import get_chroma_client, get_or_create_collection
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def _background_ingest(settings, llm_client, collection):
+    """Run paper ingestion in the background so the server can start accepting requests."""
+    await asyncio.sleep(1)
+    try:
+        logger.info("Background auto-ingestion starting...")
+        result = await ingest_papers(settings, llm_client, collection)
+        logger.info(
+            "Auto-ingested %d paper(s): %d chunks, %d figures",
+            result["papers_ingested"], result["total_chunks"], result["total_figures"],
+        )
+    except Exception:
+        logger.exception("Background ingestion failed")
 
 
 @asynccontextmanager
@@ -43,12 +58,7 @@ async def lifespan(app: FastAPI):
     app.state.translation_engine = translation_engine
 
     if collection.count() == 0:
-        logger.info("No papers in vector store, running auto-ingestion...")
-        result = await ingest_papers(settings, llm_client, collection)
-        logger.info(
-            "Auto-ingested %d paper(s): %d chunks, %d figures",
-            result["papers_ingested"], result["total_chunks"], result["total_figures"],
-        )
+        asyncio.create_task(_background_ingest(settings, llm_client, collection))
 
     logger.info("GAIA Translator backend ready.")
     yield
