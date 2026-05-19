@@ -1,6 +1,72 @@
 from app.core.disciplines import Discipline, DISCIPLINE_INFO
 
 
+def _target_info_from_persona(persona: dict) -> dict:
+    """Build target block for prompt from user persona.
+
+    Merges discipline-derived concepts with any user-declared focus concepts.
+    """
+    discipline = (persona.get("discipline") or "").strip()
+    bio = (persona.get("bio") or "").strip()
+    label = "You (the reader)"
+    key_concepts: list[str] = []
+    if discipline and discipline in [d.value for d in Discipline]:
+        disc = Discipline(discipline)
+        key_concepts = list(DISCIPLINE_INFO[disc]["key_concepts"])
+
+    # Merge user-declared concepts (newline- or comma-separated)
+    extra = _split_lines(persona.get("concepts_focus") or "")
+    for c in extra:
+        if c and c not in key_concepts:
+            key_concepts.append(c)
+
+    return {
+        "label": label,
+        "description": bio if bio else "Reader context not specified.",
+        "key_concepts": key_concepts,
+    }
+
+
+def _split_lines(text: str) -> list[str]:
+    """Split a textarea blob on newlines OR commas, trim, drop empties."""
+    if not text:
+        return []
+    out: list[str] = []
+    for part in text.replace(",", "\n").split("\n"):
+        s = part.strip(" \t-•*")
+        if s:
+            out.append(s)
+    return out
+
+
+def _format_persona_block(persona: dict) -> str:
+    """Render the structured persona fields as a 'Reader Context' block.
+
+    Only included if at least one field is non-empty.
+    """
+    sections: list[tuple[str, list[str]]] = [
+        ("Papers of interest", _split_lines(persona.get("papers_of_interest") or "")),
+        ("Concepts they want emphasized", _split_lines(persona.get("concepts_focus") or "")),
+        ("Methodologies they use", _split_lines(persona.get("methods_focus") or "")),
+        ("Tech stack / tools", _split_lines(persona.get("tech_stack") or "")),
+    ]
+    sections = [(h, items) for h, items in sections if items]
+    if not sections:
+        return ""
+    lines = [
+        "## Reader Context",
+        "Personalize the translation toward this reader. Frame examples and analogies "
+        "using their tools and methods; prioritize the concepts they care about.",
+        "",
+    ]
+    for header, items in sections:
+        lines.append(f"**{header}:**")
+        for item in items[:30]:
+            lines.append(f"- {item}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def build_translation_prompt(
     source: Discipline,
     target: Discipline,
@@ -36,13 +102,22 @@ def build_streaming_prompt(
     target: Discipline,
     retrieved_context: list[dict],
     figure_descriptions: list[dict],
+    target_persona: dict | None = None,
 ) -> list[dict]:
-    """Build a prompt for streaming that outputs plain text (not JSON)."""
+    """Build a prompt for streaming. If target_persona has a non-empty bio, use it as the target audience."""
     src_info = DISCIPLINE_INFO[source]
-    tgt_info = DISCIPLINE_INFO[target]
+    persona_has_signal = bool(target_persona and any(
+        (target_persona.get(k) or "").strip()
+        for k in ("bio", "papers_of_interest", "concepts_focus", "methods_focus", "tech_stack")
+    ))
+    if persona_has_signal:
+        tgt_info = _target_info_from_persona(target_persona or {})
+    else:
+        tgt_info = DISCIPLINE_INFO[target]
 
     context_block = _format_context(retrieved_context)
     figures_block = _format_figures(figure_descriptions)
+    persona_block = _format_persona_block(target_persona or {}) if persona_has_signal else ""
 
     system_content = f"""{_core_system_prompt(src_info, tgt_info)}
 
@@ -52,21 +127,20 @@ Follow this template exactly:
 
 <!-- SECTION: overview -->
 **Translation for {tgt_info['label']}**
-A concise overview (3-5 sentences) of what the source text is saying, translated into \
-{tgt_info['label']} terms. Map the key jargon and give the reader the gist.
+A concise overview (3-5 sentences) of what the source text is saying, translated into terms \
+this reader can act on. Map the key jargon and give them the gist.
 
 <!-- SECTION: relevance -->
-**Why This Matters for {tgt_info['label']} Research**
-A deeper explanation (1-2 paragraphs) of the specific, practical implications for \
-{tgt_info['label']} work. Be concrete: name specific pipelines, datasets, models, \
-measurements, or analyses that are affected. Connect to the lab's geohazard mission.
+**Why This Matters for This Reader**
+A deeper explanation (1-2 paragraphs) of the specific, practical implications for this reader's \
+work. Be concrete: name specific pipelines, datasets, models, measurements, or analyses that \
+are affected. Connect to the lab's geohazard mission.
 
 <!-- SECTION: workstreams -->
 **Potentially Relevant Domain Workstreams**
-List 2-3 concrete, actionable workstreams where {tgt_info['label']} expertise would \
-directly advance the lab's geohazard mission in light of what was just translated. \
-Format each as: **Workstream Name**: description. Each should be specific enough \
-that the reader could start working on it.
+List 2-3 concrete, actionable workstreams that would directly advance the lab's geohazard mission \
+in light of what was just translated. Format each as: **Workstream Name**: description. Each should \
+be specific enough that the reader could start working on it.
 
 ## Formatting Rules
 - Use **bold text** for headers, NEVER use ### or ## markdown headers.
@@ -74,6 +148,8 @@ that the reader could start working on it.
 - When relevant, mention [Fig: paper_id/fig_num].
 - Do NOT wrap your response in JSON or code fences.
 - The <!-- SECTION: ... --> markers are mandatory and must appear exactly as shown.
+
+{persona_block}
 
 {context_block}
 

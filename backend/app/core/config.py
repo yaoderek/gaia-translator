@@ -12,8 +12,13 @@ class Settings(BaseSettings):
     database_url: str
 
     supabase_url: str
+    supabase_anon_key: str = ""
     supabase_service_key: str
+    supabase_jwt_secret: str = ""
     supabase_storage_bucket: str = "gaia-papers"
+
+    # Comma-separated list of allowed CORS origins (e.g. https://gaia-translator.fly.dev)
+    cors_origins: str = "http://localhost:5173"
 
     # Local temp dirs used during PDF processing
     papers_dir: str = "/tmp/gaia_papers"

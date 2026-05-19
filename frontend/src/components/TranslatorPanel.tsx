@@ -1,16 +1,28 @@
 import { ArrowRightLeft, Loader2, Sparkles } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { useTranslate } from "../hooks/useTranslate";
-import type { Discipline } from "../types";
+import type { Discipline, TargetDiscipline } from "../types";
 import ChatThread from "./ChatThread";
 import CitationPanel from "./CitationCard";
 import DisciplineSelector from "./DisciplineSelector";
 import FigureViewer from "./FigureViewer";
 import TranslationOutput from "./TranslationOutput";
 
+const DISCIPLINES: Discipline[] = [
+  "hydrology",
+  "seismology",
+  "atmospheric_science",
+  "climatology",
+  "geology",
+  "computer_science",
+  "applied_mathematics",
+];
+
 export default function TranslatorPanel() {
+  const { user, me } = useAuth();
   const [sourceDiscipline, setSourceDiscipline] = useState<Discipline>("seismology");
-  const [targetDiscipline, setTargetDiscipline] = useState<Discipline>("hydrology");
+  const [targetDiscipline, setTargetDiscipline] = useState<TargetDiscipline>("hydrology");
   const [inputText, setInputText] = useState("");
 
   const {
@@ -20,25 +32,47 @@ export default function TranslatorPanel() {
     followUpQuestions,
     isStreaming,
     error,
+    isPersonalized,
     translate,
   } = useTranslate();
 
+  useEffect(() => {
+    if (user) {
+      setTargetDiscipline((prev) => (prev === "personalized" ? prev : "personalized"));
+    } else {
+      setTargetDiscipline((prev) => (prev === "personalized" ? "hydrology" : prev));
+    }
+  }, [user]);
+
+  const resolveTargetForApi = useCallback((): Discipline => {
+    if (targetDiscipline !== "personalized") return targetDiscipline;
+    const personaDisc = me?.persona?.discipline;
+    return personaDisc && DISCIPLINES.includes(personaDisc as Discipline)
+      ? (personaDisc as Discipline)
+      : "computer_science";
+  }, [targetDiscipline, me?.persona?.discipline]);
+
   const handleTranslate = useCallback(() => {
     if (!inputText.trim() || isStreaming) return;
-    translate(inputText, sourceDiscipline, targetDiscipline);
-  }, [inputText, sourceDiscipline, targetDiscipline, isStreaming, translate]);
+    translate(inputText, sourceDiscipline, resolveTargetForApi());
+  }, [inputText, sourceDiscipline, resolveTargetForApi, isStreaming, translate]);
 
   const handleSwap = useCallback(() => {
-    setSourceDiscipline(targetDiscipline);
-    setTargetDiscipline(sourceDiscipline);
+    if (targetDiscipline === "personalized") {
+      setTargetDiscipline(sourceDiscipline);
+      setSourceDiscipline("hydrology");
+    } else {
+      setSourceDiscipline(targetDiscipline);
+      setTargetDiscipline(sourceDiscipline);
+    }
   }, [sourceDiscipline, targetDiscipline]);
 
   const handleFollowUp = useCallback(
     (text: string) => {
       setInputText(text);
-      translate(text, sourceDiscipline, targetDiscipline);
+      translate(text, sourceDiscipline, resolveTargetForApi());
     },
-    [sourceDiscipline, targetDiscipline, translate]
+    [sourceDiscipline, resolveTargetForApi, translate]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -58,6 +92,7 @@ export default function TranslatorPanel() {
           <DisciplineSelector
             value={sourceDiscipline}
             onChange={setSourceDiscipline}
+            exclude={targetDiscipline === "personalized" ? undefined : targetDiscipline}
           />
         </div>
 
@@ -74,10 +109,20 @@ export default function TranslatorPanel() {
           <span className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
             To
           </span>
-          <DisciplineSelector
-            value={targetDiscipline}
-            onChange={setTargetDiscipline}
-          />
+          {user ? (
+            <DisciplineSelector
+              allowPersonalized
+              value={targetDiscipline}
+              onChange={setTargetDiscipline}
+              exclude={sourceDiscipline}
+            />
+          ) : (
+            <DisciplineSelector
+              value={targetDiscipline as Discipline}
+              onChange={setTargetDiscipline}
+              exclude={sourceDiscipline}
+            />
+          )}
         </div>
       </div>
 
@@ -124,6 +169,12 @@ export default function TranslatorPanel() {
 
         {/* Output panel */}
         <div className="flex flex-col">
+          {isPersonalized && (
+            <div className="px-4 py-1.5 border-b border-slate-100 bg-blue-50/70 flex items-center gap-1.5 text-xs text-blue-700">
+              <Sparkles className="w-3.5 h-3.5" />
+              Personalized to you
+            </div>
+          )}
           <div className="flex-1 min-h-[280px]">
             <TranslationOutput
               text={translationText}

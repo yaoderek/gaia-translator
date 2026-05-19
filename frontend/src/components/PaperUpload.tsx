@@ -1,5 +1,6 @@
 import { FileUp, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 import { uploadPaper } from "../lib/api";
 
 type UploadStatus =
@@ -9,6 +10,7 @@ type UploadStatus =
   | { state: "error"; message: string };
 
 export default function PaperUpload() {
+  const { user } = useAuth();
   const [status, setStatus] = useState<UploadStatus>({ state: "idle" });
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,10 +31,12 @@ export default function PaperUpload() {
           message: `Ingested "${result.title || file.name}": ${result.num_chunks} chunks, ${result.num_figures} figures`,
         });
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const res = err && typeof err === "object" && "response" in err ? (err as { response?: { status?: number } }).response : undefined;
+      const is401 = res?.status === 401;
       setStatus({
         state: "error",
-        message: err instanceof Error ? err.message : "Upload failed",
+        message: is401 ? "Please log in to upload papers." : (err instanceof Error ? err.message : "Upload failed"),
       });
     }
   }, []);
@@ -90,7 +94,9 @@ export default function PaperUpload() {
             <p className="text-sm text-slate-600">
               Drop a PDF here or <span className="text-blue-600 font-medium">browse</span>
             </p>
-            <p className="text-xs text-slate-400">Papers are processed and added to the knowledge base</p>
+            <p className="text-xs text-slate-400">
+              {user ? "Papers are processed and added to the knowledge base" : "Log in to upload papers"}
+            </p>
           </>
         )}
         <input
