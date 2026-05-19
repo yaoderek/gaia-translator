@@ -17,7 +17,21 @@ CREATE TABLE IF NOT EXISTS papers (
     s3_pdf_key TEXT NOT NULL DEFAULT '',
     num_chunks INT DEFAULT 0,
     num_figures INT DEFAULT 0,
-    ingested_at TIMESTAMPTZ DEFAULT NOW()
+    ingested_at TIMESTAMPTZ DEFAULT NOW(),
+    uploaded_by_user_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS personas (
+    user_id TEXT PRIMARY KEY,
+    username TEXT DEFAULT '',
+    discipline TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    tags TEXT DEFAULT '',
+    papers_of_interest TEXT DEFAULT '',
+    concepts_focus TEXT DEFAULT '',
+    methods_focus TEXT DEFAULT '',
+    tech_stack TEXT DEFAULT '',
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS chunks (
@@ -49,12 +63,31 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
     await register_vector(conn)
 
 
+def _is_supabase_url(url: str) -> bool:
+    return "supabase.com" in url or "supabase.co" in url
+
+
 async def init_pool(database_url: str) -> asyncpg.Pool:
     global _pool
 
-    # First, create the pgvector extension via a standalone connection
-    # (must happen before pool init tries to register the vector type)
-    conn = await asyncpg.connect(database_url, statement_cache_size=0)
+    ssl = "require" if _is_supabase_url(database_url) else None
+
+    # Validate connection before creating the pool, so startup errors are clear.
+    try:
+        conn = await asyncpg.connect(database_url, statement_cache_size=0, ssl=ssl)
+    except Exception as exc:
+        msg = str(exc)
+        hint = ""
+        if "Tenant or user not found" in msg or "does not exist" in msg.lower():
+            hint = (
+                "\n\nHINT: DATABASE_URL appears to use the wrong Supabase format. "
+                "Use the Transaction pooler URL from Supabase Dashboard → "
+                "Project Settings → Database → Connection string → Transaction tab. "
+                "Format: postgresql://postgres.PROJECT_REF:PASSWORD"
+                "@aws-0-REGION.pooler.supabase.com:6543/postgres"
+            )
+        raise RuntimeError(f"Database connection failed: {exc}{hint}") from exc
+
     try:
         await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         logger.info("pgvector extension ensured")
@@ -67,6 +100,7 @@ async def init_pool(database_url: str) -> asyncpg.Pool:
         max_size=10,
         init=_init_connection,
         statement_cache_size=0,  # required for Supabase transaction pooler
+        ssl=ssl,
     )
     logger.info("Postgres connection pool created")
     return _pool
@@ -75,6 +109,19 @@ async def init_pool(database_url: str) -> asyncpg.Pool:
 async def init_tables(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
         await conn.execute(_SCHEMA_SQL)
+        await conn.execute(
+            "ALTER TABLE papers ADD COLUMN IF NOT EXISTS uploaded_by_user_id TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE personas ADD COLUMN IF NOT EXISTS username TEXT DEFAULT ''"
+        )
+        await conn.execute(
+            "ALTER TABLE personas ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT ''"
+        )
+        for col in ("papers_of_interest", "concepts_focus", "methods_focus", "tech_stack"):
+            await conn.execute(
+                f"ALTER TABLE personas ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT ''"
+            )
     logger.info("Database tables initialized")
 
 

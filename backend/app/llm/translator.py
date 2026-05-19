@@ -56,7 +56,11 @@ class TranslationEngine:
         raw = await self._llm.chat(messages, temperature=0.3)
         return _parse_response(raw, chunks, figures)
 
-    async def translate_stream(self, request: TranslateRequest):
+    async def translate_stream(
+        self,
+        request: TranslateRequest,
+        target_persona: dict | None = None,
+    ):
         """Yield SSE-formatted events: metadata first, then plain-text tokens, then follow-ups."""
         discipline_filter = [
             request.source_discipline.value,
@@ -67,6 +71,7 @@ class TranslationEngine:
             query=request.text,
             n_results=8,
             discipline_filter=discipline_filter,
+            persona=target_persona,
         )
         figures = _filter_meaningful_figures(
             await self._retriever.get_figures_for_chunks(chunks)
@@ -77,6 +82,7 @@ class TranslationEngine:
             target=request.target_discipline,
             retrieved_context=chunks,
             figure_descriptions=figures,
+            target_persona=target_persona,
         )
         messages.append({"role": "user", "content": request.text})
 
@@ -84,6 +90,7 @@ class TranslationEngine:
             "type": "metadata",
             "citations": _build_citations(chunks),
             "figures": _build_figure_refs(figures),
+            "personalized": bool(target_persona and (target_persona.get("bio") or "").strip()),
         }
         yield f"data: {json.dumps(metadata)}\n\n"
 

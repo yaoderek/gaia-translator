@@ -74,6 +74,63 @@ def extract_figures(pdf_path: str, output_dir: str, paper_id: str) -> list[dict]
     return figures
 
 
+_AUTHOR_AFFILIATION_NOISE = re.compile(
+    r"\b(university|institute|laboratory|department|school of|division of|"
+    r"college of|center for|centre for|inc\.|corp\.|ltd\.|@|orcid|"
+    r"corresponding author|received|accepted|revised|copyright|©|abstract|keywords)\b",
+    re.IGNORECASE,
+)
+_AUTHOR_NAME_TOKEN = re.compile(r"[A-Z][a-zA-Z'\-À-ſ]+")
+_AND_SEP = re.compile(r"\s+and\s+|\s*&\s*|;", re.IGNORECASE)
+
+
+def extract_authors(text_blocks: list[dict], title: str = "") -> str:
+    """Best-effort author extraction from the front-matter of a paper.
+
+    Strategy: scan blocks on page 1 (after the title) for a line that looks like
+    a comma-and-and-separated list of capitalized names without affiliation noise.
+    Returns a comma-separated string, or "" if no good candidate found.
+    """
+    if not text_blocks:
+        return ""
+    page1 = [b for b in text_blocks if b.get("page") == 1]
+    if not page1:
+        return ""
+
+    title_norm = (title or "").strip().lower()
+    seen_title = False
+    for block in page1[:25]:
+        text = (block.get("text") or "").strip()
+        if not text or len(text) > 400:
+            if title_norm and not seen_title and title_norm in text.lower():
+                seen_title = True
+            continue
+        if title_norm and not seen_title:
+            if title_norm in text.lower():
+                seen_title = True
+            continue
+        if _AUTHOR_AFFILIATION_NOISE.search(text):
+            continue
+        # Strip trailing superscripts/numbers and parenthetical affiliations
+        candidate = re.sub(r"[\d\*†‡§¶]+", "", text)
+        candidate = re.sub(r"\([^)]*\)", "", candidate).strip(" ,.;")
+        parts = [p.strip(" ,.") for p in _AND_SEP.split(candidate) if p.strip()]
+        # Comma-separated authors are common too
+        if len(parts) == 1 and "," in parts[0]:
+            parts = [p.strip() for p in parts[0].split(",") if p.strip()]
+        good = [
+            p for p in parts
+            if 2 <= len(p.split()) <= 5
+            and len(_AUTHOR_NAME_TOKEN.findall(p)) >= 2
+            and not any(ch.isdigit() for ch in p)
+        ]
+        if len(good) >= 2:
+            return ", ".join(good[:20])
+        if len(good) == 1 and seen_title:
+            return good[0]
+    return ""
+
+
 def extract_captions(text_blocks: list[dict]) -> dict[int, list[str]]:
     """Find figure captions grouped by page.
 

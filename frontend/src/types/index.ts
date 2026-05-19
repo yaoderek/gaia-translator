@@ -7,6 +7,9 @@ export type Discipline =
   | "computer_science"
   | "applied_mathematics";
 
+/** Target selector can be a discipline or "Personalized" when logged in. */
+export type TargetDiscipline = Discipline | "personalized";
+
 export interface DisciplineInfo {
   value: Discipline;
   label: string;
@@ -41,6 +44,7 @@ export interface StreamMetadata {
   type: "metadata";
   citations: Citation[];
   figures: FigureRef[];
+  personalized?: boolean;
 }
 
 export interface StreamToken {
@@ -58,4 +62,5 @@ export interface PaperInfo {
   num_chunks: number;
   num_figures: number;
   ingested_at: string;
+  uploaded_by_user_id?: string | null;
 }

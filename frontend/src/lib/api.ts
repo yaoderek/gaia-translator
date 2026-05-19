@@ -1,7 +1,14 @@
 import axios from "axios";
 import type { DisciplineInfo, PaperInfo } from "../types";
+import { getAuthTokenAsync } from "./supabase";
 
 const client = axios.create({ baseURL: "/api" });
+
+client.interceptors.request.use(async (config) => {
+  const token = await getAuthTokenAsync();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
 export async function fetchDisciplines(): Promise<DisciplineInfo[]> {
   const { data } = await client.get<DisciplineInfo[]>("/disciplines");
@@ -41,4 +48,32 @@ export async function uploadPaper(file: File): Promise<{
     timeout: 120_000,
   });
   return data;
+}
+
+export interface Persona {
+  username: string;
+  discipline: string;
+  bio: string;
+  tags: string;
+  papers_of_interest: string;
+  concepts_focus: string;
+  methods_focus: string;
+  tech_stack: string;
+  updated_at: string | null;
+}
+
+export interface MeResponse {
+  user_id: string;
+  email: string | null;
+  username: string;
+  persona: Persona;
+}
+
+export async function fetchMe(): Promise<MeResponse> {
+  const { data } = await client.get<MeResponse>("/me");
+  return data;
+}
+
+export async function updatePersona(body: Partial<Omit<Persona, "updated_at">>): Promise<void> {
+  await client.put("/me/persona", body);
 }

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { getAuthTokenAsync } from "../lib/supabase";
 import type { Citation, Discipline, FigureRef } from "../types";
 
 interface TranslateState {
@@ -8,6 +9,7 @@ interface TranslateState {
   followUpQuestions: string[];
   isStreaming: boolean;
   error: string | null;
+  isPersonalized: boolean;
 }
 
 export function useTranslate() {
@@ -18,6 +20,7 @@ export function useTranslate() {
     followUpQuestions: [],
     isStreaming: false,
     error: null,
+    isPersonalized: false,
   });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -34,12 +37,17 @@ export function useTranslate() {
         followUpQuestions: [],
         isStreaming: true,
         error: null,
+        isPersonalized: false,
       });
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const token = await getAuthTokenAsync();
+      if (token) headers.Authorization = `Bearer ${token}`;
 
       try {
         const resp = await fetch("/api/translate", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             text,
             source_discipline: source,
@@ -80,6 +88,7 @@ export function useTranslate() {
                   ...prev,
                   citations: event.citations || [],
                   figures: event.figures || [],
+                  isPersonalized: !!event.personalized,
                 }));
               } else if (event.type === "token") {
                 fullText += event.content;

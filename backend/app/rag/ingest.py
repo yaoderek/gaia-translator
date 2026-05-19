@@ -11,7 +11,7 @@ from app.core.config import Settings
 from app.llm.client import LLMClient
 from app.rag.chunker import chunk_text
 from app.rag.embeddings import embed_chunks
-from app.rag.extractor import extract_captions, extract_figures, extract_text_blocks
+from app.rag.extractor import extract_authors, extract_captions, extract_figures, extract_text_blocks
 from app.storage.s3 import upload_file as s3_upload
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,7 @@ async def ingest_pdf(
     llm_client: LLMClient,
     pdf_bytes: bytes,
     filename: str,
+    uploaded_by_user_id: str | None = None,
 ) -> dict:
     """Ingest a single PDF: upload to S3, extract, embed, store in Postgres.
 
@@ -133,14 +134,15 @@ async def ingest_pdf(
 
     chunks = await embed_chunks(llm_client, chunks)
     title = _guess_title(text_blocks, filename)
+    authors = extract_authors(text_blocks, title)
 
     # Store everything in Postgres
     async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute(
-                """INSERT INTO papers (id, filename, title, authors, file_hash, s3_pdf_key, num_chunks, num_figures)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-                paper_id, filename, title, "", fhash, s3_pdf_key, len(chunks), len(figures),
+                """INSERT INTO papers (id, filename, title, authors, file_hash, s3_pdf_key, num_chunks, num_figures, uploaded_by_user_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
+                paper_id, filename, title, authors, fhash, s3_pdf_key, len(chunks), len(figures), uploaded_by_user_id,
             )
 
             for fig in figures:
@@ -161,7 +163,7 @@ async def ingest_pdf(
                        VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10)""",
                     chunk_id, paper_id, chunk["section_title"],
                     chunk["page_start"], chunk["page_end"],
-                    chunk["text"], vec, title, "", "general",
+                    chunk["text"], vec, title, authors, "general",
                 )
 
     logger.info("Paper %s: %d chunks, %d figures", filename, len(chunks), len(figures))

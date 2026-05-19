@@ -1,8 +1,9 @@
 import logging
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from starlette.responses import RedirectResponse
 
+from app.auth import get_current_user_id
 from app.core.disciplines import DISCIPLINE_INFO
 from app.db.postgres import get_pool
 from app.models.schemas import IngestResponse, PaperInfo
@@ -50,7 +51,11 @@ async def get_paper_pdf(paper_id: str, request: Request):
 
 
 @router.post("/api/papers/upload")
-async def upload_paper(request: Request, file: UploadFile = File(...)):
+async def upload_paper(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
@@ -62,7 +67,10 @@ async def upload_paper(request: Request, file: UploadFile = File(...)):
     pool = get_pool()
     llm_client = request.app.state.llm_client
 
-    result = await ingest_pdf(settings, pool, llm_client, pdf_bytes, file.filename)
+    result = await ingest_pdf(
+        settings, pool, llm_client, pdf_bytes, file.filename,
+        uploaded_by_user_id=user_id,
+    )
 
     if result.get("skipped"):
         return {

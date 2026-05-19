@@ -6,7 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.config import router as config_router
 from app.api.figures import router as figures_router
+from app.api.me import router as me_router
 from app.api.papers import router as papers_router
 from app.api.translate import router as translate_router
 from app.core.config import get_settings
@@ -23,6 +25,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info("Initializing GAIA Translator backend...")
+    if not (settings.supabase_jwt_secret or "").strip():
+        logger.warning(
+            "SUPABASE_JWT_SECRET is not set in backend/.env — login and My persona will return 401. "
+            "Set it from Supabase Dashboard → API → Legacy JWT Secret (Reveal, then copy)."
+        )
 
     pool = await init_pool(settings.database_url)
     await init_tables(pool)
@@ -51,15 +58,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_settings = get_settings()
+_cors_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(config_router)
 app.include_router(translate_router)
+app.include_router(me_router)
 app.include_router(papers_router)
 app.include_router(figures_router)
 

@@ -47,3 +47,14 @@ class IngestResponse(BaseModel):
     papers_ingested: int
     total_chunks: int
     total_figures: int
+
+
+class PersonaUpdate(BaseModel):
+    username: str | None = None
+    discipline: str | None = None
+    bio: str | None = None
+    tags: str | None = None  # comma-separated specialization tags
+    papers_of_interest: str | None = None  # newline-separated: titles, DOIs, or short refs
+    concepts_focus: str | None = None  # newline- or comma-separated concept phrases
+    methods_focus: str | None = None  # newline- or comma-separated methods/methodologies
+    tech_stack: str | None = None  # newline- or comma-separated tools/libraries/languages
